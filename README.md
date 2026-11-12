@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/assets/icon.png" width="128" alt="Boundless Player">
+<img src=".github/assets/banner.jpg" alt="Boundless Player">
 
 # Boundless Player
 
-**Movies, series and anime, one liquid glass player.**
+**Movies, series and anime, one player.**
 
 On iPhone, iPad, Mac and Android.
 
@@ -25,7 +25,18 @@ On iPhone, iPad, Mac and Android.
 
 <br>
 
-Boundless Player plays what you point it at: the sources you add and your own video files. Every title gets a page of its own, with the logo, the cast, photos and what the databases know about it, and everything is drawn in Liquid Glass.
+Boundless Player plays what you point it at: the sources you add and your own video files. Every title gets a page of its own, with the logo, the cast, photos and what the databases know about it.
+
+<p align="center">
+  <img src=".github/assets/screens/01-browse.jpg" width="49%" alt="Browse">
+  <img src=".github/assets/screens/02-title.jpg" width="49%" alt="Title page">
+</p>
+<p align="center">
+  <img src=".github/assets/screens/03-info.jpg" width="49%" alt="Info page">
+</p>
+
+<sub>Shown with the built-in Open Films source: Blender open movies (CC BY) and public domain classics. Art and data from TMDB.</sub>
+
 
 ## Download
 
