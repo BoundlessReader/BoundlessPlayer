@@ -377,28 +377,28 @@ layout_init() {
 }
 
 palette_init() {
-  rgb_seq 38 110 116 160; C_DIM=$CS
-  rgb_seq 38 223 227 255; C_TXT=$CS
-  rgb_seq 38 167 159 255; C_LAV=$CS
-  rgb_seq 38 95 210 240;  C_CY=$CS
+  rgb_seq 38 168 135 120; C_DIM=$CS
+  rgb_seq 38 255 238 225; C_TXT=$CS
+  rgb_seq 38 255 160 100; C_LAV=$CS
+  rgb_seq 38 255 201 63;  C_CY=$CS
   rgb_seq 38 255 120 130; C_ERR=$CS
-  rgb_seq 48 36 38 78;    C_PILLBG=$CS
-  rgb_seq 38 212 217 255; C_PILLFG=$CS
+  rgb_seq 48 62 30 16;    C_PILLBG=$CS
+  rgb_seq 38 255 226 200; C_PILLFG=$CS
   rgb_seq 38 255 255 255; C_HI=$CS
-  grad_make $AUR $AURN 59 43 214  106 47 217  124 92 255  95 210 240  28 95 214  59 43 214
-  grad_make $WM $WMN 255 255 255  217 220 255  143 134 255  79 199 234
-  grad_make $WMH $WMN 255 255 255  255 255 255  217 220 255  160 230 250
-  grad_make $TAG $TAGN 167 159 255  95 210 240
-  grad_make $BRD $BRDN 59 43 214  124 92 255  95 210 240
-  grad_make $BRDD $BRDN 28 24 80  50 40 110  30 80 110
+  grad_make $AUR $AURN 214 40 40  255 107 26  255 160 60  255 201 63  255 107 26  214 40 40
+  grad_make $WM $WMN 255 255 255  255 236 215  255 160 90  255 201 63
+  grad_make $WMH $WMN 255 255 255  255 255 255  255 236 215  255 220 150
+  grad_make $TAG $TAGN 255 160 100  255 201 63
+  grad_make $BRD $BRDN 214 40 40  255 107 26  255 201 63
+  grad_make $BRDD $BRDN 70 20 16  110 50 20  110 85 30
 }
 
 # panel glass: slightly lighter at the top, deeper at the bottom
 panel_bg_init() {
   local i r g b
   for (( i = 0; i < 24; i++ )); do
-    r=$(( 17 - i / 3 )); g=$(( 19 - i / 3 )); b=$(( 40 - i ))
-    if [ "$CT" != true ]; then r=13; g=15; b=30; fi
+    r=$(( 30 - i / 2 )); g=$(( 17 - i / 3 )); b=$(( 14 - i / 3 ))
+    if [ "$CT" != true ]; then r=22; g=12; b=10; fi
     rgb_seq 48 "$r" "$g" "$b"; PB[i]=$CS
   done
 }
@@ -500,7 +500,7 @@ render_wm() { # row
 
 # ── rows ──────────────────────────────────────────────────────────────────────
 TAG1="Movies, series and anime, "
-TAG2="one liquid glass player."
+TAG2="one player."
 
 row_header() { # row index within header 0-3
   local k=$1 w
@@ -520,7 +520,7 @@ row_title_compact() {
 }
 
 row_tagline() {
-  local total=50 n shown i idx pad
+  local total=37 n shown i idx pad
   n=$(( (TV - 38) * 2 )); [ "$MODE" = anim ] || n=99
   clamp "$n" 0 "$total"; shown=$CL
   pad=$(( (INNER - total) / 2 )); lsp "$pad"
@@ -528,7 +528,7 @@ row_tagline() {
     if [ "$i" -lt 26 ]; then
       lp "${C_TXT}${TAG1:i:1}" 1
     else
-      idx=$(( (i - 26) * TAGN / 24 )); lp "${GF[TAG+idx]}${TAG2:i-26:1}" 1
+      idx=$(( (i - 26) * TAGN / 11 )); lp "${GF[TAG+idx]}${TAG2:i-26:1}" 1
     fi
   done
 }
