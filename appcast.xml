@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Boundless Player</title>
+    <link>https://boundless.moe</link>
+    <description>Boundless Player release history.</description>
+    <language>en</language>
+    <item>
+      <title>Version 1.0.0</title>
+      <sparkle:version>289</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <pubDate>Thu, 12 Nov 2026 15:54:29 GMT</pubDate>
+      <enclosure
+        url="https://github.com/BoundlessReader/BoundlessPlayer/releases/download/v1.0.0/boundless-player-v1.0.0-macos.dmg"
+        sparkle:edSignature="BQCWBN2QomO6BckPGwB+jfM2a7yQ78//qRkUYI8gOIDXJ1Wm95eWA866LvwD5t/Yl+iVrWpkAMCYlACPbYYQCA=="
+        length="28158283"
+        type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
