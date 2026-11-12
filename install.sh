@@ -250,23 +250,34 @@ JS
 }
 
 # ── art ───────────────────────────────────────────────────────────────────────
-# One awk run draws the infinity mark and the wordmark as rows of half-block codes
+# One awk run draws the Player mark (two bars and the play triangle) and the wordmark as rows of dot and half-block codes
 # (0 empty, 1 upper half, 2 lower half, 3 full).
-INFB=(); INFW=18; WMK=()
+INFB=(); INFW=11; WMK=()
 art_init() {
   local out kind row
-  out=$(awk -v CW=18 '
+  out=$(awk -v CW=11 '
+  # Distance from point (px,py) to the segment a-b.
+  function dseg(px, py, ax, ay, bx, by,   dx, dy, t, l2, qx, qy) {
+    dx = bx - ax; dy = by - ay; l2 = dx * dx + dy * dy
+    t = ((px - ax) * dx + (py - ay) * dy) / l2
+    if (t < 0) t = 0; if (t > 1) t = 1
+    qx = ax + t * dx - px; qy = ay + t * dy - py
+    return sqrt(qx * qx + qy * qy)
+  }
+  function cross(ax, ay, bx, by, px, py) { return (bx - ax) * (py - ay) - (by - ay) * (px - ax) }
   BEGIN {
-    DW = CW * 2; DH = 16; r = 1.45; a = DW / 2 - r - 0.6; n = 420
-    for (i = 0; i < n; i++) {
-      t = 6.283185307 * i / n; d = 1 + sin(t) * sin(t)
-      px[i] = DW / 2 + a * cos(t) / d
-      py[i] = DH / 2 + a * sin(t) * cos(t) / d * 0.92
-    }
+    # The mark of the Player icon in its own units (562 by 444): two bars 94 wide at 0 and 128, and the triangle (306,34) (528,222)
+    # (306,410) with corners rounded by a 34 radius. The grid is 16 dots tall and the mark is centred in it.
+    DW = CW * 2; DH = 16; S = DH / 444.0; OX = (DW - 562 * S) / 2
     for (y = 0; y < DH; y++) for (x = 0; x < DW; x++) {
-      cx = x + 0.5; cy = y + 0.5; best = 1e9
-      for (i = 0; i < n; i++) { dx = cx - px[i]; dy = cy - py[i]; q = dx * dx + dy * dy; if (q < best) best = q }
-      g[x, y] = (best <= r * r) ? 1 : 0
+      u = (x + 0.5 - OX) / S; v = (y + 0.5) / S; on = 0
+      if (dseg(u, v, 47, 64, 47, 380) <= 47) on = 1
+      if (dseg(u, v, 175, 64, 175, 380) <= 47) on = 1
+      c1 = cross(306, 34, 528, 222, u, v); c2 = cross(528, 222, 306, 410, u, v); c3 = cross(306, 410, 306, 34, u, v)
+      inside = ((c1 >= 0 && c2 >= 0 && c3 >= 0) || (c1 <= 0 && c2 <= 0 && c3 <= 0))
+      d = dseg(u, v, 306, 34, 528, 222); e = dseg(u, v, 528, 222, 306, 410); f = dseg(u, v, 306, 410, 306, 34)
+      if (inside || d <= 34 || e <= 34 || f <= 34) on = 1
+      g[x, y] = on
     }
     split("1 2 4 64", b0, " "); split("8 16 32 128", b1, " ")
     line = "I"
@@ -279,6 +290,10 @@ art_init() {
       line = line " " v
     }
     print line
+    L["P"] = "####.|#...#|#...#|####.|#....|#....|#...."
+    L["a"] = ".....|.....|.###.|....#|.####|#...#|.####"
+    L["y"] = ".....|.....|#...#|#...#|#...#|.####|....#|.###."
+    L["r"] = ".....|.....|#.##.|##..#|#....|#....|#...."
     L["B"] = "####.|#...#|#...#|####.|#...#|#...#|####."
     L["o"] = ".....|.....|.###.|#...#|#...#|#...#|.###."
     L["u"] = ".....|.....|#...#|#...#|#...#|#..##|.##.#"
@@ -287,13 +302,13 @@ art_init() {
     L["l"] = "##.|.#.|.#.|.#.|.#.|.#.|.##"
     L["e"] = ".....|.....|.###.|#...#|#####|#....|.####"
     L["s"] = ".....|.....|.####|#....|.###.|....#|####."
-    word = "Boundless"
+    word = "Player"
     for (row = 0; row < 8; row++) ln[row] = ""
     for (i = 1; i <= length(word); i++) {
-      ch = substr(word, i, 1); split(L[ch], rr, "|"); w = length(rr[1])
+      ch = substr(word, i, 1); nr = split(L[ch], rr, "|"); w = length(rr[1])
       for (row = 0; row < 8; row++) {
         seg = ""
-        if (row < 7) seg = rr[row + 1]; else for (j = 0; j < w; j++) seg = seg "."
+        if (row < nr) seg = rr[row + 1]; else for (j = 0; j < w; j++) seg = seg "."
         ln[row] = ln[row] seg (i < length(word) ? "." : "")
       }
     }
@@ -484,28 +499,28 @@ render_wm() { # row
 }
 
 # ── rows ──────────────────────────────────────────────────────────────────────
-TAG1="Comics, manga and novels, "
-TAG2="one liquid glass library."
+TAG1="Movies, series and anime, "
+TAG2="one liquid glass player."
 
 row_header() { # row index within header 0-3
   local k=$1 w
   if [ "$TIER" = full ]; then
-    lsp 2; render_inf "$k"; LWID=$(( LWID + INFW )); lsp 2; render_wm "$k"; LWID=$(( LWID + ${#WMK[0]} ))
+    w=$(( INFW + 3 + ${#WMK[0]} )); lsp $(( (INNER - w) / 2 )); render_inf "$k"; LWID=$(( LWID + INFW )); lsp 3; render_wm "$k"; LWID=$(( LWID + ${#WMK[0]} ))
   else
     w=${#WMK[0]}; lsp $(( (INNER - w) / 2 )); render_wm "$k"; LWID=$(( LWID + w ))
   fi
 }
 
 row_title_compact() {
-  local i word="Boundless" idx
-  lsp 2; lp "${GF[AUR+10]}∞ " 2
+  local i word="Boundless Player" idx
+  lsp 2; lp "${GF[AUR+10]}▮▮▶ " 4
   for (( i = 0; i < ${#word}; i++ )); do
     idx=$(( i * WMN / ${#word} )); lp "${GF[WM+idx]}${ESC}[1m${word:i:1}${R}${CURBG}" 1
   done
 }
 
 row_tagline() {
-  local total=51 n shown i idx pad
+  local total=50 n shown i idx pad
   n=$(( (TV - 38) * 2 )); [ "$MODE" = anim ] || n=99
   clamp "$n" 0 "$total"; shown=$CL
   pad=$(( (INNER - total) / 2 )); lsp "$pad"
@@ -513,7 +528,7 @@ row_tagline() {
     if [ "$i" -lt 26 ]; then
       lp "${C_TXT}${TAG1:i:1}" 1
     else
-      idx=$(( (i - 26) * TAGN / 25 )); lp "${GF[TAG+idx]}${TAG2:i-26:1}" 1
+      idx=$(( (i - 26) * TAGN / 24 )); lp "${GF[TAG+idx]}${TAG2:i-26:1}" 1
     fi
   done
 }
