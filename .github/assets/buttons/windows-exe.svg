@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="64" viewBox="0 0 300 64" role="img" aria-labelledby="t">
+  <title id="t">Download for Windows (EXE)</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#24100a"/>
+      <stop offset="1" stop-color="#0f0705"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6b1a"/>
+      <stop offset="1" stop-color="#ffc93f"/>
+    </linearGradient>
+    <linearGradient id="plus" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d62828"/>
+      <stop offset="1" stop-color="#ffc93f"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4cc2ff"/>
+      <stop offset="1" stop-color="#0a64c8"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="298" height="62" rx="16" fill="url(#bg)" stroke="#6b3a22" stroke-width="1.5"/>
+  <rect x="12" y="12" width="40" height="40" rx="10" fill="url(#tile)"/>
+  <rect x="12.5" y="12.5" width="39" height="39" rx="9.5" fill="none" stroke="#ffffff" stroke-opacity="0.18"/>
+  <g fill="#ffffff">
+    <rect x="19" y="19" width="12.5" height="12.5" rx="0.8"/>
+    <rect x="32.5" y="19" width="12.5" height="12.5" rx="0.8"/>
+    <rect x="19" y="32.5" width="12.5" height="12.5" rx="0.8"/>
+    <rect x="32.5" y="32.5" width="12.5" height="12.5" rx="0.8"/>
+  </g>
+  <text x="66" y="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="600" letter-spacing="1.3" fill="#ffc9a0">WINDOWS</text>
+  <text x="66" y="47" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#ffffff">Download EXE</text>
+  <circle cx="269" cy="32" r="13" fill="url(#plus)"/>
+  <path d="M269 25.5v12M263.5 32.2l5.5 5.6 5.5-5.6" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
