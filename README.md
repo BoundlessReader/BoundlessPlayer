@@ -12,6 +12,8 @@ On iPhone, iPad, Mac and Android.
   <a href="https://github.com/BoundlessReader/BoundlessPlayer/releases/latest"><img src=".github/assets/buttons/mac-dmg.svg" height="48" alt="Download the Mac app (DMG)"></a>
   &nbsp;
   <a href="https://github.com/BoundlessReader/BoundlessPlayer/releases/latest"><img src=".github/assets/buttons/android-apk.svg" height="48" alt="Download the Android app (APK)"></a>
+  &nbsp;
+  <a href="https://github.com/BoundlessReader/BoundlessPlayer/releases/latest"><img src=".github/assets/buttons/windows-exe.svg" height="48" alt="Download the Windows app (EXE)"></a>
 </p>
 
 [![Latest release](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FBoundlessReader%2FBoundlessPlayer%2Fbadges%2Frelease.json&style=flat-square)](https://github.com/BoundlessReader/BoundlessPlayer/releases/latest)
@@ -44,6 +46,7 @@ Boundless Player plays what you point it at: the sources you add and your own vi
 | --- | --- |
 | **Mac** | The DMG from [the latest release](https://github.com/BoundlessReader/BoundlessPlayer/releases/latest). It is signed and notarized by Apple, needs a Mac with Apple silicon (M1 or newer) and macOS 14 or later, and updates itself |
 | **Android** | The APK from [the latest release](https://github.com/BoundlessReader/BoundlessPlayer/releases/latest). `arm64` suits most phones, `universal` works on any |
+| **Windows** | The `-windows-x64-setup.exe` from [the latest release](https://github.com/BoundlessReader/BoundlessPlayer/releases/latest). It needs Windows 11 (64 bit) and installs for your user, with no administrator rights. It is not code signed yet, so Windows SmartScreen may warn the first time: choose More info, then Run anyway. The `.msi` next to it is the same installer for IT and the command line |
 | **iPhone and iPad** | Through TestFlight and the App Store once Apple has processed 1.0.0 |
 
 Updating from an earlier version keeps your library, progress and settings.
