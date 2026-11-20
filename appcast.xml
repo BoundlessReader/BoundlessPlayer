@@ -9,15 +9,15 @@
     <language>en</language>
     <item>
       <title>Version 1.2.0</title>
-      <sparkle:version>453</sparkle:version>
+      <sparkle:version>459</sparkle:version>
       <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <pubDate>Thu, 19 Nov 2026 21:21:37 +0000</pubDate>
+      <pubDate>Fri, 20 Nov 2026 08:49:44 +0000</pubDate>
       <enclosure
         url="https://github.com/BoundlessReader/BoundlessPlayer/releases/download/v1.2.0/boundless-player-v1.2.0-macos.dmg"
-        sparkle:edSignature="9KJHtLlnst8EVHD9kKlARZYT7lE20Iut5hlf7SMLWfEUBO+EVqrU0eQlo/93moCjKgnMokVRg7+X+xNfVDQlCw=="
-        length="29011295"
+        sparkle:edSignature="RYUlXhmQUU+WMP+1iAe0gwrJFOyH0TaoqDeyy+Zk3ZFtUtd+Nw3CvqKdhqdgr7SIKNN4inpcJFpHlvhI3+vMAQ=="
+        length="29018358"
         type="application/octet-stream"/>
     </item>
     <item>
