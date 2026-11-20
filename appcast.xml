@@ -8,6 +8,19 @@
     <description>Boundless Player release history.</description>
     <language>en</language>
     <item>
+      <title>Version 1.2.1</title>
+      <sparkle:version>464</sparkle:version>
+      <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <pubDate>Fri, 20 Nov 2026 18:31:04 +0000</pubDate>
+      <enclosure
+        url="https://github.com/BoundlessReader/BoundlessPlayer/releases/download/v1.2.1/boundless-player-v1.2.1-macos.dmg"
+        sparkle:edSignature="oVcrKnnw1HRzJJC0fc3TTtwpsd3m9vYQTRvBys9vtoLhi5xezgZ2pEBoGUEKEK1FcgqJ85AsR/JXaw0oJXkNDg=="
+        length="29036390"
+        type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Version 1.2.0</title>
       <sparkle:version>459</sparkle:version>
       <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
