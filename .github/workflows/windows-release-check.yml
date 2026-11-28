@@ -1,0 +1,57 @@
+name: Windows release check
+
+# Installs the published Windows release the way a person does, with the one line command of the README, on a clean Windows runner, then
+# runs the installed app's self check. The second run of the command must say that nothing is left to do. Manual only: Actions, Windows
+# release check, Run workflow. It reads only public files, so it needs no secret.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, so the
+      # Khronos loader is built here with vcpkg (20 seconds) and put in the system folder, for the self check only.
+      - name: Give the runner a Vulkan loader
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install vulkan-loader:x64-windows --clean-after-build 2>&1 | Select-Object -Last 3
+          $built = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows\bin\vulkan-1.dll'
+          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          if (Test-Path $built) { Copy-Item $built $dll -Force }
+          "vulkan-1.dll in System32: $(Test-Path $dll)"
+          if (-not (Test-Path $dll)) { exit 1 }
+      - name: Run the one line installer
+        shell: pwsh
+        run: |
+          $env:BOUNDLESS_PLAIN = '1'
+          $env:BOUNDLESS_INSTALL_LOG = Join-Path $env:RUNNER_TEMP 'install-1.log'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BoundlessReader/BoundlessPlayer/main/install.ps1 | iex"
+          '--- install log'
+          Get-Content $env:BOUNDLESS_INSTALL_LOG | Select-Object -Last 40
+          $exe = Join-Path $env:LOCALAPPDATA 'Boundless Player App\Boundless Player.exe'
+          if (-not (Test-Path $exe)) { 'the command did not install the app'; exit 1 }
+          "installed product version: $((Get-Item $exe).VersionInfo.ProductVersion)"
+      - name: Run the installed app's self check
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
+          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
+          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
+          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
+          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
+          "self check exit code: $code"
+          exit $code
+      # The release notes carry the build number of the Windows files, which is how the script knows that what it installed is what it sees.
+      - name: Run the command again, it must have nothing to do
+        shell: pwsh
+        run: |
+          $env:BOUNDLESS_PLAIN = '1'
+          $env:BOUNDLESS_INSTALL_LOG = Join-Path $env:RUNNER_TEMP 'install-2.log'
+          $out = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BoundlessReader/BoundlessPlayer/main/install.ps1 | iex" 2>&1 | Out-String
+          $out
+          if ($out -notmatch 'Nothing to do') { 'the second run installed again instead of saying that nothing was left to do'; exit 1 }
