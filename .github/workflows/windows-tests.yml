@@ -1,0 +1,51 @@
+name: Windows tests
+
+# Runs the tests of the Windows app on a Windows runner, where the tests that need the registry, a job object, a window or the system
+# folders run for real instead of being skipped. Manual only: Actions, Windows tests, Run workflow.
+# The source is private and is read with PLAYER_SOURCE_TOKEN, a read only token for that one repository. It is never printed.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source ref to test, a branch, tag or commit (defaults to main)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          repository: BoundlessReader/boundless-player-app
+          ref: ${{ inputs.ref || 'main' }}
+          token: ${{ secrets.PLAYER_SOURCE_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Accept the Android SDK licenses
+        shell: bash
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" --licenses > /dev/null || true
+      # The timing budgets are set for an idle desktop. A shared runner is slower, so each figure is loosened.
+      - name: Run the desktop tests
+        run: ./gradlew --no-daemon --continue :desktopApp:test
+        env:
+          BOUNDLESS_PERF_SLACK: 6
+      - name: Count the results
+        if: always()
+        shell: bash
+        run: |
+          cd desktopApp/build/test-results/test 2>/dev/null || { echo "no results"; exit 0; }
+          cat *.xml | grep -o '<testsuite [^>]*' | awk '
+            { for (i = 1; i <= NF; i++) { split($i, kv, "="); gsub(/"/, "", kv[2]);
+                if (kv[1] == "tests") t += kv[2]; if (kv[1] == "failures") f += kv[2]; if (kv[1] == "errors") e += kv[2]; if (kv[1] == "skipped") s += kv[2] } }
+            END { printf "tests %d, failures %d, errors %d, skipped %d\n", t, f, e, s }' | tee -a "$GITHUB_STEP_SUMMARY"
