@@ -69,6 +69,25 @@ jobs:
           if ($wix) { Add-Content $env:GITHUB_PATH (Join-Path $wix.FullName 'bin'); "WiX: $($wix.FullName)" } else { "WiX not found; the Compose plugin fetches its own" }
       - name: Build the MSI and the setup program
         run: ./gradlew --no-daemon :desktopApp:packageMsi :desktopApp:packageExe
+      # Installs the MSI the way a PC does, for this user, then runs the installed app's own self check with no window: the database, the
+      # secret store, the script engine, the picture decoder, the network, the video engine, the key server and the browser.
+      - name: Install the MSI and run the self check of the installed app
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $msi = (Get-ChildItem desktopApp/build/compose/binaries/main/msi/*.msi | Select-Object -First 1).FullName
+          $log = Join-Path $env:RUNNER_TEMP 'msi.log'
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
+          "msiexec exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; exit 1 }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          Get-ChildItem $dir | Format-Table Name, Length -AutoSize
+          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
+          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
+          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
+          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
+          "self check exit code: $code"
+          exit $code
       - name: Name the files and check the version
         id: files
         shell: bash
