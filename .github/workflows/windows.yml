@@ -111,13 +111,13 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
           "msiexec exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; exit 1 }
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\Boundless Player.exe'
+          $exe = Join-Path $env:LOCALAPPDATA 'Boundless Player App\Boundless Player.exe'
           if (-not (Test-Path $exe)) {
-            'the app is not in %LOCALAPPDATA%\Programs\Boundless Player, where the MSI put it:'
+            'the app is not in %LOCALAPPDATA%\Boundless Player App, where the MSI put it:'
             Get-ChildItem -Path $env:LOCALAPPDATA -Recurse -Depth 3 -Filter 'Boundless Player.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
             exit 1
           }
-          'the app is in %LOCALAPPDATA%\Programs\Boundless Player'
+          'the app is in %LOCALAPPDATA%\Boundless Player App'
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
           "msiexec /x exit code: $($p.ExitCode)"
           if (Test-Path $exe) { 'the uninstall left the program behind'; exit 1 }
@@ -139,7 +139,7 @@ jobs:
           '--- install log'
           Get-Content $env:BOUNDLESS_INSTALL_LOG
           '--- install folder'
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           Get-ChildItem $dir | Format-Table Name, Length -AutoSize
           if (-not (Test-Path (Join-Path $dir 'Boundless Player.exe'))) { 'the script did not install the app'; exit 1 }
           if (-not (Get-ChildItem (Join-Path $data 'backups') -Recurse -Filter boundless.db -ErrorAction SilentlyContinue)) { 'the script did not save the library'; exit 1 }
@@ -158,11 +158,13 @@ jobs:
               "runtime $v"; $got = $true; break
             } catch { "no runtime $v ($($_.Exception.Message))" }
           }
-          if (-not $got) { Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing }
-          "downloaded $((Get-Item $exe).Length) bytes"
-          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
-          "installer exit code: $($p.ExitCode)"
+          if (-not $got) { 'no Vulkan runtime could be downloaded'; exit 1 }
           $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          foreach ($flags in @('/S'), @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')) {
+            if (Test-Path $dll) { break }
+            $p = Start-Process $exe -ArgumentList $flags -PassThru
+            if ($p.WaitForExit(90000)) { "exit code $($p.ExitCode) with $flags" } else { Stop-Process -Id $p.Id -Force; "stopped after 90 seconds with $flags" }
+          }
           "vulkan-1.dll in System32: $(Test-Path $dll)"
           if (-not (Test-Path $dll)) { exit 1 }
       # The installed app's own check, with no window: the database, the secret store, the script engine, the picture decoder, the
@@ -170,7 +172,7 @@ jobs:
       - name: Run the self check of the installed app
         shell: pwsh
         run: |
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
           if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
           $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
@@ -209,7 +211,7 @@ jobs:
             }
           }
           "@
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           $p = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -PassThru
           Start-Sleep -Seconds 40
           $p.Refresh()
