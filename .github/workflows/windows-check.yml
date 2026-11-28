@@ -55,6 +55,8 @@ jobs:
           '--- uninstall entries'
           Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -like 'Boundless*' } | Format-List DisplayName, DisplayVersion, InstallLocation, UninstallString
+          $expected = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\Boundless Player.exe'
+          "the app is where the installer script and Update now expect it: $(Test-Path $expected)"
           '--- what the install log says about places and scope'
           Select-String -Path $log -Pattern 'INSTALLDIR|TARGETDIR|ALLUSERS|MSIINSTALLPERUSER|InstallScope|LocalAppDataFolder|ProgramFiles64Folder' | Select-Object -First 40 | ForEach-Object { $_.Line.Trim() }
       - name: Remove it again
@@ -123,8 +125,14 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          choco install vulkan-runtime -y --no-progress
-          "vulkan-1.dll in System32 now: $(Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))"
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing
+          "downloaded $((Get-Item $exe).Length) bytes"
+          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
+          "installer exit code: $($p.ExitCode)"
+          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          "vulkan-1.dll in System32 now: $(Test-Path $dll)"
+          if (-not (Test-Path $dll)) { exit 1 }
       - name: Run the self check again with the loader
         shell: pwsh
         continue-on-error: true
