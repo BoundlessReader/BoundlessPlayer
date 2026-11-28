@@ -3,6 +3,8 @@ name: Windows installer
 # Builds the Windows MSI and the setup program of a published release and attaches them to it, with their lines added to
 # SHA256SUMS.txt. Manual only: Actions, Windows installer, Run workflow.
 # The source is private and is read with PLAYER_SOURCE_TOKEN, a read only token for that one repository. It is never printed.
+# Before anything is attached the MSI is installed on the runner by the project's own installer script, the installed app runs its
+# self check, and the app is opened for a while and photographed, so a build that does not start never reaches a release.
 on:
   workflow_dispatch:
     inputs:
@@ -13,7 +15,7 @@ on:
         description: Source ref to build, a branch, tag or commit (defaults to main)
         required: false
       publish:
-        description: Attach the files to the release. Off builds them and keeps them for 3 days only.
+        description: Attach the files to the release. Off builds and checks them and keeps them for 3 days only.
         type: boolean
         default: true
 
@@ -69,25 +71,6 @@ jobs:
           if ($wix) { Add-Content $env:GITHUB_PATH (Join-Path $wix.FullName 'bin'); "WiX: $($wix.FullName)" } else { "WiX not found; the Compose plugin fetches its own" }
       - name: Build the MSI and the setup program
         run: ./gradlew --no-daemon :desktopApp:packageMsi :desktopApp:packageExe
-      # Installs the MSI the way a PC does, for this user, then runs the installed app's own self check with no window: the database, the
-      # secret store, the script engine, the picture decoder, the network, the video engine, the key server and the browser.
-      - name: Install the MSI and run the self check of the installed app
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $msi = (Get-ChildItem desktopApp/build/compose/binaries/main/msi/*.msi | Select-Object -First 1).FullName
-          $log = Join-Path $env:RUNNER_TEMP 'msi.log'
-          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
-          "msiexec exit code: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; exit 1 }
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
-          Get-ChildItem $dir | Format-Table Name, Length -AutoSize
-          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
-          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
-          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
-          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
-          "self check exit code: $code"
-          exit $code
       - name: Name the files and check the version
         id: files
         shell: bash
@@ -107,6 +90,146 @@ jobs:
         with:
           name: windows-installers
           path: out/*
+          retention-days: 3
+          if-no-files-found: ignore
+      # What a person gets from double clicking the MSI: msiexec with no property of ours. The app must land in the folder the
+      # installer script and the app's Update now expect.
+      - name: Install the MSI as it comes
+        shell: pwsh
+        env:
+          V: ${{ steps.files.outputs.version }}
+        run: |
+          $msi = (Resolve-Path "out/boundless-player-v${env:V}-windows-x64.msi").Path
+          $log = Join-Path $env:RUNNER_TEMP 'msi-plain.log'
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
+          "msiexec exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; exit 1 }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\Boundless Player.exe'
+          if (-not (Test-Path $exe)) {
+            'the app is not in %LOCALAPPDATA%\Programs\Boundless Player, where the MSI put it:'
+            Get-ChildItem -Path $env:LOCALAPPDATA -Recurse -Depth 3 -Filter 'Boundless Player.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            exit 1
+          }
+          'the app is in %LOCALAPPDATA%\Programs\Boundless Player'
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
+          "msiexec /x exit code: $($p.ExitCode)"
+          if (Test-Path $exe) { 'the uninstall left the program behind'; exit 1 }
+      # The way a person updates: the installer script, given the MSI instead of a download. It checks what the MSI installs, saves the
+      # library, runs msiexec for the user and leaves the app in the folder the app's Update now expects.
+      - name: Install with the installer script
+        shell: pwsh
+        env:
+          V: ${{ steps.files.outputs.version }}
+        run: |
+          $msi = (Resolve-Path "out/boundless-player-v${env:V}-windows-x64.msi").Path
+          $data = Join-Path $env:LOCALAPPDATA 'Boundless Player'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $data 'boundless.db'), (New-Object byte[] 4096))
+          $env:BOUNDLESS_LOCAL_MSI = $msi
+          $env:BOUNDLESS_PLAIN = '1'
+          $env:BOUNDLESS_INSTALL_LOG = Join-Path $env:RUNNER_TEMP 'install.log'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Raw installer/install.ps1 | Invoke-Expression"
+          '--- install log'
+          Get-Content $env:BOUNDLESS_INSTALL_LOG
+          '--- install folder'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          Get-ChildItem $dir | Format-Table Name, Length -AutoSize
+          if (-not (Test-Path (Join-Path $dir 'Boundless Player.exe'))) { 'the script did not install the app'; exit 1 }
+          if (-not (Get-ChildItem (Join-Path $data 'backups') -Recurse -Filter boundless.db -ErrorAction SilentlyContinue)) { 'the script did not save the library'; exit 1 }
+          'the app is installed and the library was saved'
+          Remove-Item (Join-Path $data 'boundless.db')
+      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, so the
+      # loader is installed here, for the checks only. It is not part of the installer.
+      - name: Give the runner a Vulkan loader
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing
+          "downloaded $((Get-Item $exe).Length) bytes"
+          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
+          "installer exit code: $($p.ExitCode)"
+          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          "vulkan-1.dll in System32: $(Test-Path $dll)"
+          if (-not (Test-Path $dll)) { exit 1 }
+      # The installed app's own check, with no window: the database, the secret store, the script engine, the picture decoder, the
+      # network, the video engine, the key server and the browser. It needs every module of the trimmed runtime.
+      - name: Run the self check of the installed app
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
+          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
+          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
+          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
+          "self check exit code: $code"
+          exit $code
+      # Opens the installed app as a person does and looks at the screen: it must still be running after 40 seconds, and a picture of
+      # the screen is kept with the files.
+      - name: Open the installed app and photograph it
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition @"
+          using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
+          public class Wnd {
+            public delegate bool EnumProc(IntPtr h, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr l);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+            public static List<string> ForPid(uint pid) {
+              var list = new List<string>();
+              EnumWindows((h, l) => {
+                uint p; GetWindowThreadProcessId(h, out p);
+                if (p == pid) {
+                  var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                  var c = new StringBuilder(256); GetClassName(h, c, 256);
+                  RECT r; GetWindowRect(h, out r);
+                  list.Add("window " + h.ToInt64().ToString("x") + " visible=" + IsWindowVisible(h) + " class=" + c + " title='" + t + "' rect=" + r.L + "," + r.T + "," + r.R + "," + r.B);
+                }
+                return true;
+              }, IntPtr.Zero);
+              return list;
+            }
+          }
+          "@
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $p = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -PassThru
+          Start-Sleep -Seconds 40
+          $p.Refresh()
+          $ok = -not $p.HasExited
+          if ($ok) { "the app is running, main window title: '$($p.MainWindowTitle)'" } else { "the app exited with code $($p.ExitCode)" }
+          [Wnd]::ForPid([uint32]$p.Id)
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap($area.Width, $area.Height)
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            $gfx.CopyFromScreen($area.Location, [System.Drawing.Point]::Empty, $area.Size)
+            New-Item -ItemType Directory -Force shots | Out-Null
+            $bmp.Save((Join-Path (Resolve-Path shots).Path 'app-window.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+            "screen: $($area.Width) by $($area.Height)"
+            $counts = @{}
+            for ($y = 0; $y -lt $area.Height; $y += 8) { for ($x = 0; $x -lt $area.Width; $x += 8) { $k = $bmp.GetPixel($x, $y).ToArgb(); $counts[$k] = 1 + [int]$counts[$k] } }
+            $total = ($counts.Values | Measure-Object -Sum).Sum
+            "sampled $total pixels, $($counts.Count) distinct colors; the five most common:"
+            $counts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 5 | ForEach-Object { '  #{0:X6}  {1:P1}' -f ($_.Key -band 0xFFFFFF), ($_.Value / $total) }
+          } catch { "no picture of the screen: $($_.Exception.Message)" }
+          Get-ChildItem $dir -Filter 'hs_err_*.log' | ForEach-Object { "native crash log: $($_.Name)" }
+          $data = Join-Path $env:LOCALAPPDATA 'Boundless Player'
+          '--- logs/startup.txt'
+          Get-Content (Join-Path $data 'logs\startup.txt') -ErrorAction SilentlyContinue
+          if (-not $p.HasExited) { [void]$p.CloseMainWindow(); if (-not $p.WaitForExit(15000)) { $p.Kill() } }
+          if (-not $ok) { exit 1 }
+      - name: Keep the picture for 3 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app-picture
+          path: shots/*
           retention-days: 3
           if-no-files-found: ignore
       - name: Attach to the release and add to SHA256SUMS.txt
