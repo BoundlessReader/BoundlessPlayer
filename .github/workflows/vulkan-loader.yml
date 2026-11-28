@@ -1,0 +1,53 @@
+name: Vulkan loader
+
+# Builds the Khronos Vulkan loader (vulkan-1.dll) for the Windows player and puts it, with its licence text, in a zip on a pre-release
+# of this repository. The build of the player downloads that file and checks its SHA-256 (vulkan-loader.properties of the source).
+# Manual only: Actions, Vulkan loader, Run workflow. It must stay a pre-release: the apps read releases/latest of this repository.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  loader:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Build the loader with vcpkg
+        shell: pwsh
+        run: |
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe'
+          & $vcpkg install vulkan-loader:x64-windows --clean-after-build 2>&1 | Select-Object -Last 8
+          $line = (& $vcpkg list vulkan-loader) | Where-Object { $_ -match '^vulkan-loader:x64-windows\s+(\S+)' } | Select-Object -First 1
+          if (-not $line) { 'vcpkg lists no vulkan-loader'; exit 1 }
+          $null = $line -match '^vulkan-loader:x64-windows\s+(\S+)'
+          $version = ($Matches[1] -split '#')[0]
+          $root = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows'
+          $dll = Join-Path $root 'bin\vulkan-1.dll'
+          if (-not (Test-Path $dll)) { 'the loader was not built'; exit 1 }
+          New-Item -ItemType Directory -Force pack | Out-Null
+          Copy-Item $dll pack\vulkan-1.dll
+          Copy-Item (Join-Path $root 'share\vulkan-loader\copyright') pack\LICENSE-Vulkan-Loader.txt
+          $zip = "vulkan-loader-$version-x64.zip"
+          Compress-Archive -Path pack\* -DestinationPath $zip -Force
+          "version=$version" | Add-Content $env:GITHUB_ENV
+          "zip=$zip" | Add-Content $env:GITHUB_ENV
+          "vulkan-1.dll: $((Get-Item $dll).VersionInfo.FileVersion), $((Get-Item $dll).Length) bytes"
+          "zip: $zip, $((Get-Item $zip).Length) bytes"
+          "SHA-256 of the zip: $((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower())"
+          "SHA-256 of vulkan-1.dll: $((Get-FileHash $dll -Algorithm SHA256).Hash.ToLower())"
+          '--- licence text'
+          Get-Content pack\LICENSE-Vulkan-Loader.txt
+      - name: Publish it as a pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "vulkan-loader-$env:version"
+          $sha = (Get-FileHash $env:zip -Algorithm SHA256).Hash.ToLower()
+          $notes = "The Khronos Vulkan loader, vulkan-1.dll, version $env:version, built from source with vcpkg on a Windows runner (x64, Release) for the Windows player. It is Apache 2.0 licensed and the licence text is in the zip. The build of the player downloads this file and checks its SHA-256, $sha. This is a pre-release on purpose: the apps read releases/latest of this repository for updates."
+          gh release view $tag -R $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { "release $tag exists already, nothing was changed"; exit 1 }
+          gh release create $tag $env:zip -R $env:GITHUB_REPOSITORY --prerelease --latest=false --title "Vulkan loader $env:version for the Windows player" --notes $notes
+          gh release view $tag -R $env:GITHUB_REPOSITORY --json tagName,isPrerelease,assets --jq '"\(.tagName) prerelease=\(.isPrerelease) assets=\([.assets[]|"\(.name) \(.digest)"]|join(", "))"'
