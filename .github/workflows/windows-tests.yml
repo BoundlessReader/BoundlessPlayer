@@ -1,13 +1,16 @@
 name: Windows tests
 
-# Runs the tests of the Windows app on a Windows runner, where the tests that need the registry, a job object, a window or the system
-# folders run for real instead of being skipped. Manual only: Actions, Windows tests, Run workflow.
+# Runs the tests of the Windows app on a Windows runner, where the tests that need the registry, a job object, a window, the system
+# folders or the video engine run for real instead of being skipped. Manual only: Actions, Windows tests, Run workflow.
 # The source is private and is read with PLAYER_SOURCE_TOKEN, a read only token for that one repository. It is never printed.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: Source ref to test, a branch, tag or commit (defaults to main)
+        required: false
+      only:
+        description: Only the tests whose class name matches, such as MpvEngine (default is every test)
         required: false
 
 permissions:
@@ -35,11 +38,60 @@ jobs:
       - name: Accept the Android SDK licenses
         shell: bash
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" --licenses > /dev/null || true
+      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, so the
+      # loader is installed here, for the tests only.
+      - name: Give the runner a Vulkan loader
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing
+          "downloaded $((Get-Item $exe).Length) bytes"
+          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
+          "installer exit code: $($p.ExitCode)"
+          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          "vulkan-1.dll in System32: $(Test-Path $dll)"
+          if (-not (Test-Path $dll)) { exit 1 }
+      # The video engine the app ships, fetched the way the installer build fetches it.
+      - name: Fetch libmpv
+        run: ./gradlew --no-daemon :desktopApp:fetchLibmpv
+      # The files the engine tests play: a clip with sound, a Matroska file with an ASS track, a subtitle file and two HLS folders, one
+      # of them encrypted with the key the tests know.
+      - name: Make the media of the engine tests
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $ff = (Get-Command ffmpeg).Source
+          $m = Join-Path $env:RUNNER_TEMP 'media'
+          New-Item -ItemType Directory -Force (Join-Path $m 'hls\clear'), (Join-Path $m 'hls\enc') | Out-Null
+          @('1', '00:00:00,500 --> 00:00:03,000', 'Hello from the test', '', '2', '00:00:04,000 --> 00:00:09,000', 'A second line', '') | Set-Content -Encoding ascii (Join-Path $m 'sub.srt')
+          @(
+            '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 640', 'PlayResY: 360', '',
+            '[V4+ Styles]',
+            'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+            'Style: Default,Arial,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1', '',
+            '[Events]',
+            'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+            'Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,0,,Subtitle of the test'
+          ) | Set-Content -Encoding ascii (Join-Path $m 'sub.ass')
+          & $ff -y -hide_banner -loglevel error -f lavfi -i 'testsrc2=size=640x360:rate=25' -f lavfi -i 'sine=frequency=440:sample_rate=44100' -t 12 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest (Join-Path $m 'test.mp4')
+          & $ff -y -hide_banner -loglevel error -i (Join-Path $m 'test.mp4') -i (Join-Path $m 'sub.ass') -map 0:v -map 0:a -map 1:0 -c copy -c:s ass (Join-Path $m 'test.mkv')
+          & $ff -y -hide_banner -loglevel error -i (Join-Path $m 'test.mp4') -c copy -f hls -hls_time 4 -hls_playlist_type vod -hls_segment_filename (Join-Path $m 'hls\clear\seg%d.ts') (Join-Path $m 'hls\clear\index.m3u8')
+          [IO.File]::WriteAllBytes((Join-Path $m 'hls\enc\enc.key'), [byte[]](0x09, 0x28, 0xdb, 0x55, 0x4b, 0xb2, 0x5c, 0xe0, 0xd5, 0x8c, 0x20, 0x26, 0x41, 0xda, 0x16, 0x7a))
+          Set-Content -Encoding ascii (Join-Path $m 'keyinfo.txt') @('enc.key', (Join-Path $m 'hls\enc\enc.key'))
+          & $ff -y -hide_banner -loglevel error -i (Join-Path $m 'test.mp4') -c copy -f hls -hls_time 4 -hls_playlist_type vod -hls_key_info_file (Join-Path $m 'keyinfo.txt') -hls_segment_filename (Join-Path $m 'hls\enc\seg%d.ts') (Join-Path $m 'hls\enc\index.m3u8')
+          Get-ChildItem $m -Recurse -File | Select-Object @{ n = 'File'; e = { $_.FullName.Substring($m.Length) } }, Length | Format-Table -AutoSize
       # The timing budgets are set for an idle desktop. A shared runner is slower, so each figure is loosened.
       - name: Run the desktop tests
-        run: ./gradlew --no-daemon --continue :desktopApp:test
+        shell: bash
+        run: |
+          filter=()
+          if [ -n "${ONLY}" ]; then filter=(--tests "*${ONLY}*"); fi
+          ./gradlew --no-daemon --continue :desktopApp:test "${filter[@]}"
         env:
           BOUNDLESS_PERF_SLACK: 6
+          BOUNDLESS_LIBMPV: ${{ github.workspace }}\desktopApp\build\libmpv\files\libmpv-2.dll
+          BOUNDLESS_TEST_MEDIA: ${{ runner.temp }}\media
+          ONLY: ${{ inputs.only }}
       - name: Count the results
         if: always()
         shell: bash
