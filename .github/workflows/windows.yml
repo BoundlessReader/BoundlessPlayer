@@ -144,7 +144,14 @@ jobs:
         shell: pwsh
         run: |
           $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
-          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing
+          $got = $false
+          foreach ($v in '1.3.296.0', '1.3.290.0', '1.3.283.0', '1.3.268.0') {
+            try {
+              Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-$v-Installer.exe" -OutFile $exe -UseBasicParsing
+              "runtime $v"; $got = $true; break
+            } catch { "no runtime $v ($($_.Exception.Message))" }
+          }
+          if (-not $got) { Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing }
           "downloaded $((Get-Item $exe).Length) bytes"
           $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
           "installer exit code: $($p.ExitCode)"
