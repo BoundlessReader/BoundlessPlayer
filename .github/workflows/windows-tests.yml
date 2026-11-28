@@ -38,22 +38,19 @@ jobs:
       - name: Accept the Android SDK licenses
         shell: bash
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" --licenses > /dev/null || true
-      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, so the
-      # Khronos loader is built here with vcpkg (20 seconds) and put in the system folder, for the tests only.
-      - name: Give the runner a Vulkan loader
+      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, on purpose: the
+      # installer carries a copy and the engine has to manage with that. Should an image ever have one, this stops the run, since a pass
+      # would then not show that the copy works.
+      - name: Check that the runner has no Vulkan loader of its own
         shell: pwsh
-        continue-on-error: true
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install vulkan-loader:x64-windows --clean-after-build 2>&1 | Select-Object -Last 6
-          $built = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows\bin\vulkan-1.dll'
-          "built loader: $(Test-Path $built)"
           $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
-          if (Test-Path $built) { Copy-Item $built $dll -Force }
           "vulkan-1.dll in System32: $(Test-Path $dll)"
-          if (-not (Test-Path $dll)) { exit 1 }
-      # The video engine the app ships, fetched the way the installer build fetches it.
-      - name: Fetch libmpv
-        run: ./gradlew --no-daemon :desktopApp:fetchLibmpv
+          if (Test-Path $dll) { 'the runner has a Vulkan loader of its own, so a pass would not show that the copy of the installer works'; exit 1 }
+      # The video engine the app ships and the Vulkan loader it carries for a PC without a graphics driver, fetched the way the installer
+      # build fetches them.
+      - name: Fetch libmpv and the Vulkan loader
+        run: ./gradlew --no-daemon :desktopApp:fetchLibmpv :desktopApp:fetchVulkanLoader
       # The files the engine tests play: a clip with sound, a Matroska file with an ASS track, a subtitle file and two HLS folders, one
       # of them encrypted with the key the tests know.
       - name: Make the media of the engine tests
@@ -90,6 +87,7 @@ jobs:
         env:
           BOUNDLESS_PERF_SLACK: 6
           BOUNDLESS_LIBMPV: ${{ github.workspace }}\desktopApp\build\libmpv\files\libmpv-2.dll
+          BOUNDLESS_VULKAN_LOADER: ${{ github.workspace }}\desktopApp\build\vulkan-loader\files\vulkan-1.dll
           BOUNDLESS_TEST_MEDIA: ${{ runner.temp }}\media
           ONLY: ${{ inputs.only }}
       - name: Count the results
