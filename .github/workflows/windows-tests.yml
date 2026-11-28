@@ -42,6 +42,7 @@ jobs:
       # loader is installed here, for the tests only.
       - name: Give the runner a Vulkan loader
         shell: pwsh
+        continue-on-error: true
         run: |
           $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
           $got = $false
@@ -51,11 +52,13 @@ jobs:
               "runtime $v"; $got = $true; break
             } catch { "no runtime $v ($($_.Exception.Message))" }
           }
-          if (-not $got) { Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing }
-          "downloaded $((Get-Item $exe).Length) bytes"
-          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
-          "installer exit code: $($p.ExitCode)"
+          if (-not $got) { 'no Vulkan runtime could be downloaded'; exit 1 }
           $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          foreach ($flags in @('/S'), @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')) {
+            if (Test-Path $dll) { break }
+            $p = Start-Process $exe -ArgumentList $flags -PassThru
+            if ($p.WaitForExit(90000)) { "exit code $($p.ExitCode) with $flags" } else { Stop-Process -Id $p.Id -Force; "stopped after 90 seconds with $flags" }
+          }
           "vulkan-1.dll in System32: $(Test-Path $dll)"
           if (-not (Test-Path $dll)) { exit 1 }
       # The video engine the app ships, fetched the way the installer build fetches it.
