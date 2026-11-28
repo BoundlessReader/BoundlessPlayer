@@ -1,0 +1,54 @@
+name: Vulkan probe
+
+# A probe, run by hand: how a Vulkan loader gets onto a Windows runner without a window to click. Removed once the answer is in.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Download the runtime installer
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          foreach ($v in '1.3.296.0', '1.3.290.0', '1.3.283.0', '1.3.268.0') {
+            try {
+              Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$v/windows/VulkanRT-$v-Installer.exe" -OutFile $exe -UseBasicParsing
+              "runtime $v, $((Get-Item $exe).Length) bytes"; break
+            } catch { "no runtime $v ($($_.Exception.Message))" }
+          }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List Hash
+          '--- what 7-Zip makes of it'
+          & "C:\Program Files\7-Zip\7z.exe" l $exe | Select-Object -First 40
+      - name: Silent install with /S, two minutes at most
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          $p = Start-Process $exe -ArgumentList '/S' -PassThru
+          if (-not $p.WaitForExit(120000)) { 'still running after 2 minutes, stopped'; Stop-Process -Id $p.Id -Force } else { "exit code $($p.ExitCode)" }
+          "vulkan-1.dll in System32: $(Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))"
+          Get-ChildItem C:\VulkanRT -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20 FullName
+          Get-Process | Where-Object { $_.ProcessName -like '*ulkan*' -or $_.ProcessName -like '*install*' } | Select-Object Id, ProcessName | Format-Table
+      - name: Silent install with the Inno Setup flags, two minutes at most
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          if (Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll')) { 'already there'; exit 0 }
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          $p = Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -PassThru
+          if (-not $p.WaitForExit(120000)) { 'still running after 2 minutes, stopped'; Stop-Process -Id $p.Id -Force } else { "exit code $($p.ExitCode)" }
+          "vulkan-1.dll in System32: $(Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))"
+      - name: Take the loader out of the installer with 7-Zip
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-runtime.exe'
+          $out = Join-Path $env:RUNNER_TEMP 'vulkan-out'
+          & "C:\Program Files\7-Zip\7z.exe" x $exe "-o$out" -y | Select-Object -Last 12
+          Get-ChildItem $out -Recurse -Filter 'vulkan-1*' -ErrorAction SilentlyContinue | Select-Object FullName, Length
