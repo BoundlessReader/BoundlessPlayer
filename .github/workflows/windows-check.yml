@@ -85,7 +85,47 @@ jobs:
           if (-not (Get-ChildItem (Join-Path $data 'backups') -Recurse -Filter boundless.db -ErrorAction SilentlyContinue)) { 'the script did not save the library'; exit 1 }
           'the app is installed and the library was saved'
           Remove-Item (Join-Path $data 'boundless.db')
+      # What the video engine needs: the DLL, what it imports, and which of those this PC does not have.
+      - name: Where the video engine stands
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $res = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\app\resources'
+          Get-ChildItem $res -File | Format-Table Name, Length -AutoSize
+          $dll = Join-Path $res 'libmpv-2.dll'
+          "libmpv-2.dll present: $(Test-Path $dll)"
+          "vulkan-1.dll in System32: $(Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))"
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if ($dumpbin) {
+            $deps = & $dumpbin.FullName /dependents $dll | Where-Object { $_ -match '^\s+\S+\.dll\s*$' } | ForEach-Object { $_.Trim() }
+            foreach ($d in $deps) {
+              $found = (Test-Path (Join-Path $env:SystemRoot "System32\$d")) -or (Test-Path (Join-Path $res $d)) -or ($d -like 'api-ms-win-*')
+              '{0,-28} {1}' -f $d, $(if ($found) { 'found' } else { 'MISSING' })
+            }
+          } else { 'dumpbin was not found' }
+          Add-Type -Namespace Probe -Name Ldr -MemberDefinition '[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr LoadLibraryEx(string f, IntPtr h, uint flags);'
+          $h = [Probe.Ldr]::LoadLibraryEx($dll, [IntPtr]::Zero, 8)
+          "LoadLibraryEx handle $h, error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()) (126 is a missing module, 193 a wrong kind of file)"
       - name: Run the self check of the installed app
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
+          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
+          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
+          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
+          "self check exit code: $code"
+          exit $code
+      # The Vulkan loader a normal PC gets from its graphics driver. The runner is a bare virtual machine and has none.
+      - name: Give the runner a Vulkan loader
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          choco install vulkan-runtime -y --no-progress
+          "vulkan-1.dll in System32 now: $(Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))"
+      - name: Run the self check again with the loader
         shell: pwsh
         continue-on-error: true
         run: |
@@ -100,12 +140,40 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
+          Add-Type -TypeDefinition @"
+          using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
+          public class Wnd {
+            public delegate bool EnumProc(IntPtr h, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr l);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+            public static List<string> ForPid(uint pid) {
+              var list = new List<string>();
+              EnumWindows((h, l) => {
+                uint p; GetWindowThreadProcessId(h, out p);
+                if (p == pid) {
+                  var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                  var c = new StringBuilder(256); GetClassName(h, c, 256);
+                  RECT r; GetWindowRect(h, out r);
+                  list.Add("window " + h.ToInt64().ToString("x") + " visible=" + IsWindowVisible(h) + " class=" + c + " title='" + t + "' rect=" + r.L + "," + r.T + "," + r.R + "," + r.B);
+                }
+                return true;
+              }, IntPtr.Zero);
+              return list;
+            }
+          }
+          "@
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
           $p = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -PassThru
           Start-Sleep -Seconds 40
           $p.Refresh()
           $ok = -not $p.HasExited
-          if ($ok) { "the app is running, window title: '$($p.MainWindowTitle)'" } else { "the app exited with code $($p.ExitCode)" }
+          if ($ok) { "the app is running, main window title: '$($p.MainWindowTitle)'" } else { "the app exited with code $($p.ExitCode)" }
+          [Wnd]::ForPid([uint32]$p.Id)
           try {
             Add-Type -AssemblyName System.Windows.Forms
             Add-Type -AssemblyName System.Drawing
@@ -116,10 +184,18 @@ jobs:
             New-Item -ItemType Directory -Force shots | Out-Null
             $bmp.Save((Join-Path (Resolve-Path shots).Path 'app-window.png'), [System.Drawing.Imaging.ImageFormat]::Png)
             "screen: $($area.Width) by $($area.Height)"
+            $counts = @{}
+            for ($y = 0; $y -lt $area.Height; $y += 8) { for ($x = 0; $x -lt $area.Width; $x += 8) { $k = $bmp.GetPixel($x, $y).ToArgb(); $counts[$k] = 1 + [int]$counts[$k] } }
+            $total = ($counts.Values | Measure-Object -Sum).Sum
+            "sampled $total pixels, $($counts.Count) distinct colors; the five most common:"
+            $counts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 5 | ForEach-Object { '  #{0:X6}  {1:P1}' -f ($_.Key -band 0xFFFFFF), ($_.Value / $total) }
           } catch { "no picture of the screen: $($_.Exception.Message)" }
           Get-ChildItem $dir -Filter 'hs_err_*.log' | ForEach-Object { "native crash log: $($_.Name)" }
           $data = Join-Path $env:LOCALAPPDATA 'Boundless Player'
-          Get-ChildItem $data -Recurse -File | Select-Object -First 30 | Format-Table FullName, Length -AutoSize
+          '--- window.properties'
+          Get-Content (Join-Path $data 'window.properties') -ErrorAction SilentlyContinue
+          '--- logs/startup.txt'
+          Get-Content (Join-Path $data 'logs\startup.txt') -ErrorAction SilentlyContinue
           if (-not $p.HasExited) { [void]$p.CloseMainWindow(); if (-not $p.WaitForExit(15000)) { $p.Kill() } }
           if (-not $ok) { exit 1 }
       - name: Keep the picture for 3 days
