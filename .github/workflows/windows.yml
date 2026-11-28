@@ -1,0 +1,116 @@
+name: Windows installer
+
+# Builds the Windows MSI and the setup program of a published release and attaches them to it, with their lines added to
+# SHA256SUMS.txt. Manual only: Actions, Windows installer, Run workflow.
+# The source is private and is read with PLAYER_SOURCE_TOKEN, a read only token for that one repository. It is never printed.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the installers to, such as v1.2.2. The version of the source must be the same.
+        required: true
+      ref:
+        description: Source ref to build, a branch, tag or commit (defaults to main)
+        required: false
+      publish:
+        description: Attach the files to the release. Off builds them and keeps them for 3 days only.
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check that the release exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease --jq '"release \(.tagName), draft \(.isDraft), prerelease \(.isPrerelease)"'
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          repository: BoundlessReader/boundless-player-app
+          ref: ${{ inputs.ref || 'main' }}
+          token: ${{ secrets.PLAYER_SOURCE_TOKEN }}
+          persist-credentials: false
+      # The command people paste into PowerShell: it must parse in Windows PowerShell and PowerShell 7, and a demo run must reach the end.
+      - name: Check the PowerShell installer
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File installer/check-install.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          pwsh -NoProfile -File installer/check-install.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Accept the Android SDK licenses
+        shell: bash
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" --licenses > /dev/null || true
+      - name: Put WiX on PATH
+        shell: pwsh
+        run: |
+          $wix = Get-ChildItem "${env:ProgramFiles(x86)}" -Directory -Filter "WiX Toolset*" | Sort-Object Name -Descending | Select-Object -First 1
+          if ($wix) { Add-Content $env:GITHUB_PATH (Join-Path $wix.FullName 'bin'); "WiX: $($wix.FullName)" } else { "WiX not found; the Compose plugin fetches its own" }
+      - name: Build the MSI and the setup program
+        run: ./gradlew --no-daemon :desktopApp:packageMsi :desktopApp:packageExe
+      - name: Name the files and check the version
+        id: files
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's/^val appVersion = "\(.*\)"/\1/p' desktopApp/build.gradle.kts)
+          if [ "v$v" != "$TAG" ]; then echo "source is $v, release is $TAG"; exit 1; fi
+          mkdir out
+          cp desktopApp/build/compose/binaries/main/msi/*.msi "out/boundless-player-v$v-windows-x64.msi"
+          cp desktopApp/build/compose/binaries/main/exe/*.exe "out/boundless-player-v$v-windows-x64-setup.exe"
+          ls -l out
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Keep the files for 3 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: out/*
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Attach to the release and add to SHA256SUMS.txt
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          V: ${{ steps.files.outputs.version }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          cd out
+          gh release download "$TAG" -R "$repo" -p SHA256SUMS.txt -O sums.old || : > sums.old
+          grep -v -- '-windows-x64' sums.old > SHA256SUMS.txt || true
+          # Git Bash's sha256sum marks files as binary with a star; the installer reads plain "hash  name" lines.
+          sha256sum "boundless-player-v$V-windows-x64.msi" "boundless-player-v$V-windows-x64-setup.exe" | sed 's/ \*/  /' >> SHA256SUMS.txt
+          LC_ALL=C sort -k2 -o SHA256SUMS.txt SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          for f in "boundless-player-v$V-windows-x64.msi" "boundless-player-v$V-windows-x64-setup.exe" SHA256SUMS.txt; do
+            for i in 1 2 3 4; do
+              gh release upload "$TAG" "$f" --clobber -R "$repo" && break
+              echo "upload of $f failed, try $i"; sleep 20
+            done
+          done
+          gh release view "$TAG" -R "$repo" --json assets --jq '.assets[] | "\(.name) \(.digest)"'
