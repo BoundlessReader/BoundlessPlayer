@@ -39,6 +39,15 @@ jobs:
           set -euo pipefail
           gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n windows-installers -D out
           ls -l out
+      # libmpv imports vulkan-1.dll, which a graphics driver brings to a PC. The runner is a bare virtual machine without one, on purpose: the
+      # installer carries a copy and the engine has to manage with that. Should an image ever have one, this stops the run, since a pass
+      # would then not show that the copy works.
+      - name: Check that the runner has no Vulkan loader of its own
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+          "vulkan-1.dll in System32: $(Test-Path $dll)"
+          if (Test-Path $dll) { 'the runner has a Vulkan loader of its own, so a pass would not show that the copy of the installer works'; exit 1 }
       # What a person gets from double clicking the MSI: msiexec with no property of ours.
       - name: Install the MSI as it comes and see where it went
         shell: pwsh
@@ -114,34 +123,15 @@ jobs:
         continue-on-error: true
         run: |
           $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
+          foreach ($f in 'app\resources\vulkan\vulkan-1.dll', 'app\resources\licenses\LICENSE-Vulkan-Loader.txt', 'app\resources\licenses\Vulkan-Loader-NOTICE.txt') {
+            if (-not (Test-Path (Join-Path $dir $f))) { "missing from the install: $f"; exit 1 }
+          }
           $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
           if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
           $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
           if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
           "self check exit code: $code"
-          exit $code
-      # The Vulkan loader a normal PC gets from its graphics driver. The runner is a bare virtual machine and has none.
-      - name: Give the runner a Vulkan loader
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install vulkan-loader:x64-windows --clean-after-build 2>&1 | Select-Object -Last 6
-          $built = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows\bin\vulkan-1.dll'
-          "built loader: $(Test-Path $built)"
-          $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
-          if (Test-Path $built) { Copy-Item $built $dll -Force }
-          "vulkan-1.dll in System32: $(Test-Path $dll)"
-          if (-not (Test-Path $dll)) { exit 1 }
-      - name: Run the self check again with the loader
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
-          $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
-          if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
-          $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
-          if (Test-Path $report) { Get-Content $report } else { 'no smoke.txt was written' }
-          "self check exit code: $code"
+          if ($code -eq 0 -and -not (Select-String -Path $report -Pattern 'Vulkan loader the installer carries' -Quiet)) { 'the engine did not use the loader of the installer'; exit 1 }
           exit $code
       - name: Open the installed app and photograph it
         shell: pwsh
