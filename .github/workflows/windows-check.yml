@@ -55,7 +55,7 @@ jobs:
           '--- uninstall entries'
           Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
             Where-Object { $_.DisplayName -like 'Boundless*' } | Format-List DisplayName, DisplayVersion, InstallLocation, UninstallString
-          $expected = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\Boundless Player.exe'
+          $expected = Join-Path $env:LOCALAPPDATA 'Boundless Player App\Boundless Player.exe'
           "the app is where the installer script and Update now expect it: $(Test-Path $expected)"
           '--- what the install log says about places and scope'
           Select-String -Path $log -Pattern 'INSTALLDIR|TARGETDIR|ALLUSERS|MSIINSTALLPERUSER|InstallScope|LocalAppDataFolder|ProgramFiles64Folder' | Select-Object -First 40 | ForEach-Object { $_.Line.Trim() }
@@ -81,7 +81,7 @@ jobs:
           '--- install log'
           Get-Content $env:BOUNDLESS_INSTALL_LOG
           '--- install folder'
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           Get-ChildItem $dir | Format-Table Name, Length -AutoSize
           if (-not (Test-Path (Join-Path $dir 'Boundless Player.exe'))) { 'the script did not install the app'; exit 1 }
           if (-not (Get-ChildItem (Join-Path $data 'backups') -Recurse -Filter boundless.db -ErrorAction SilentlyContinue)) { 'the script did not save the library'; exit 1 }
@@ -92,7 +92,7 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $res = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player\app\resources'
+          $res = Join-Path $env:LOCALAPPDATA 'Boundless Player App\app\resources'
           Get-ChildItem $res -File | Format-Table Name, Length -AutoSize
           $dll = Join-Path $res 'libmpv-2.dll'
           "libmpv-2.dll present: $(Test-Path $dll)"
@@ -113,7 +113,7 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
           if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
           $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
@@ -133,18 +133,20 @@ jobs:
               "runtime $v"; $got = $true; break
             } catch { "no runtime $v ($($_.Exception.Message))" }
           }
-          if (-not $got) { Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe' -OutFile $exe -UseBasicParsing }
-          "downloaded $((Get-Item $exe).Length) bytes"
-          $p = Start-Process $exe -ArgumentList '/S' -Wait -PassThru
-          "installer exit code: $($p.ExitCode)"
+          if (-not $got) { 'no Vulkan runtime could be downloaded'; exit 1 }
           $dll = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
-          "vulkan-1.dll in System32 now: $(Test-Path $dll)"
+          foreach ($flags in @('/S'), @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')) {
+            if (Test-Path $dll) { break }
+            $p = Start-Process $exe -ArgumentList $flags -PassThru
+            if ($p.WaitForExit(90000)) { "exit code $($p.ExitCode) with $flags" } else { Stop-Process -Id $p.Id -Force; "stopped after 90 seconds with $flags" }
+          }
+          "vulkan-1.dll in System32: $(Test-Path $dll)"
           if (-not (Test-Path $dll)) { exit 1 }
       - name: Run the self check again with the loader
         shell: pwsh
         continue-on-error: true
         run: |
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           $run = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -ArgumentList '--smoke' -PassThru
           if ($run.WaitForExit(240000)) { $code = $run.ExitCode } else { $run.Kill(); 'the self check did not finish in 4 minutes'; $code = 1 }
           $report = Join-Path $env:LOCALAPPDATA 'Boundless Player\smoke.txt'
@@ -182,7 +184,7 @@ jobs:
             }
           }
           "@
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Boundless Player'
+          $dir = Join-Path $env:LOCALAPPDATA 'Boundless Player App'
           $p = Start-Process -FilePath (Join-Path $dir 'Boundless Player.exe') -PassThru
           Start-Sleep -Seconds 40
           $p.Refresh()
